@@ -103,7 +103,8 @@ DCRAM static struct {
     ramp_type_t ramp_type;      // Current segment ramp state
 #if ENABLE_JERK_ACCELERATION
     bool jerk;
-    float last_accel;   // Acceleration of last computed segment.
+    float last_accel;     // Acceleration of last computed segment.
+    float last_time_var;  // Duration of last normal segment for final segment continuity.
 #endif
     float dt_remainder;
     uint32_t steps_remaining;
@@ -963,7 +964,8 @@ void st_prep_buffer (void)
                 prep.req_mm_increment = REQ_MM_INCREMENT_SCALAR / prep.steps_per_mm;
                 prep.dt_remainder = prep.target_position = 0.0f; // Reset for new segment block
 #if ENABLE_JERK_ACCELERATION
-                prep.jerk = pl_block->condition.jerk;
+    prep.jerk = pl_block->condition.jerk;
+    prep.last_time_var = DT_SEGMENT; // Safe default for first segment's fallthrough.
 #endif
 #ifdef KINEMATICS_API
                 prep.rate_multiplier = pl_block->rate_multiplier;
@@ -1258,20 +1260,33 @@ void st_prep_buffer (void)
                     if (prep.current_speed > speed_var) { // Check if at or below zero speed.
                         // Compute distance from end of segment to end of block.
                         mm_var = mm_remaining - time_var * (prep.current_speed - 0.5f * speed_var); // (mm)
-                        if (mm_var > prep.mm_complete) { // Typical case. In deceleration ramp.
+                        if (mm_var > prep.mm_complete) {
                             mm_remaining = mm_var;
-                            prep.current_speed -= speed_var;
-                            break; // Segment complete. Exit switch-case statement. Continue do-while loop.
+                                prep.current_speed -= speed_var;
+                        #if ENABLE_JERK_ACCELERATION
+                            prep.last_time_var = time_var; // Store for final segment continuity.
+                        #endif
+                            break;// Segment complete. Exit switch-case statement. Continue do-while loop.
                         }
                     }
                     // Otherwise, at end of block or end of forced-deceleration.
+// Otherwise, at end of block or end of forced-deceleration.
 #if ENABLE_JERK_ACCELERATION
-                    if(prep.jerk) {
-                        time_var = 2.0f * (mm_remaining - prep.mm_complete) / (prep.current_speed + prep.exit_speed);
-//                        prep.last_accel = 0.0f;  // reset acceleration variable to 0 for next accel ramp
-                    } else
+    if(prep.jerk) {
+        // The trapezoidal formula (2*d / (v0+v1)) is numerically unstable under jerk-limited
+        // motion when exit_speed approaches zero — denominator collapses and time_var blows up
+        // by orders of magnitude, producing an erroneously long final segment.
+        //
+        // The S-curve is fully executed by this point. Use the duration of the last normal
+        // segment to maintain step rate continuity into the final segment — no rate increase,
+        // no snap, no drag. Position and exit_speed are snapped to correct values unconditionally
+        // after this regardless of time_var.
+        time_var = prep.last_time_var;
+        prep.last_accel = 0.0f; // Reset for next block's acceleration ramp.
+    } else
 #endif
-                    time_var = 2.0f * (mm_remaining - prep.mm_complete) / (prep.current_speed + prep.exit_speed);
+    time_var = 2.0f * (mm_remaining - prep.mm_complete) / (prep.current_speed + prep.exit_speed);
+                
 
                     mm_remaining = prep.mm_complete;
                     prep.current_speed = prep.exit_speed;
