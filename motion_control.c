@@ -1024,6 +1024,14 @@ FLASHMEM gc_probe_t mc_probe_cycle (float *target, plan_line_data_t *pl_data, gc
     if(settings.probe.soft_limited)
         grbl.apply_travel_limits(target, NULL, &sys.work_envelope);
 
+    // Keep probing off the jerk-limited path. A probe move must decelerate to a
+    // stop the instant the probe trips, and jerk-limited motion decelerates at
+    // a_eff rather than the raw axis limit -- several times softer. Probe feeds
+    // are low enough that the overrun is small either way, but the trapezoidal
+    // ramp is the one with the shortest possible stop, and probe repeatability
+    // is worth more here than ramp smoothness.
+    pl_data->condition.probe_motion = On;
+
     do {
         idx--;
         sys.probe_position[idx] = lroundf(target[idx] * settings.axis[idx].steps_per_mm);

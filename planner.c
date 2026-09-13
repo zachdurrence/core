@@ -536,7 +536,41 @@ bool plan_buffer_line (float *target, plan_line_data_t *pl_data)
 //    block->acceleration_factor = pl_data->acceleration_factor;
 #endif
 #if ENABLE_JERK_ACCELERATION
-    if((block->condition.jerk = !(block->condition.jog_motion || block->condition.system_motion || block->spindle.state.synchronized))) {
+
+/*  Jog moves are excluded from jerk-limited motion upstream. Set JERK_ON_JOG=1
+    to include them, giving jogs the same quintic ramp as program motion.
+
+    WHY IT IS OFF UPSTREAM. Jog cancel decelerates at the block's acceleration,
+    and in jerk mode that is a_eff rather than the raw axis limit -- roughly a
+    fifth of it at cutting feeds. Stopping distance after releasing a jog grows
+    accordingly:
+
+        jog feed   linear stop   jerk stop
+        F500          0.04 mm      0.53 mm
+        F2000         0.69 mm      4.22 mm
+        F5000         4.34 mm     16.69 mm
+        F20000       69.44 mm    133.49 mm
+
+    So a jog released at F5000 coasts ~17 mm instead of ~4 mm. That is the whole
+    trade: smoother, quieter jogging against a looser stop. Nothing here is
+    unsafe -- soft limits still clamp the jog TARGET, and a hard limit still
+    alarms -- but positioning by eye at high jog rates gets less precise.
+
+    The historical reason is gone: jerk-mode jogs used to hit the terminal
+    segment instability (time_var from 2*d/(v0+v1) as exit speed approached
+    zero). The quintic takes terminal time from the ramp's own duration
+    instead, so that failure mode no longer exists on any path.
+ */
+#ifndef JERK_ON_JOG
+#define JERK_ON_JOG 0
+#endif
+
+    // NOTE: probe_motion is excluded unconditionally -- see mc_probe_cycle().
+#if JERK_ON_JOG
+    if((block->condition.jerk = !(block->condition.probe_motion || block->condition.system_motion || block->spindle.state.synchronized))) {
+#else
+    if((block->condition.jerk = !(block->condition.probe_motion || block->condition.jog_motion || block->condition.system_motion || block->spindle.state.synchronized))) {
+#endif
         block->max_acceleration = limit_acceleration_by_axis_maximum(unit_vec);
         block->jerk = limit_jerk_by_axis_maximum(unit_vec);
   #if ENABLE_ACCELERATION_PROFILES

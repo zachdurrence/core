@@ -39,11 +39,12 @@ typedef union {
                  target_valid         :1,
                  target_validated     :1,
                  probing_toolsetter   :1,
+                 probe_motion         :1, //!< Set for G38.x probe moves. Used to keep probing off the jerk-limited path.
 #if ENABLE_JERK_ACCELERATION
                  jerk                 :1,
-                 unassigned           :3;
+                 unassigned           :2;
 #else
-                 unassigned           :4;
+                 unassigned           :3;
 #endif
         coolant_state_t coolant;
     };
