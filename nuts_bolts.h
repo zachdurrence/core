@@ -25,6 +25,7 @@
 #define _NUTS_BOLTS_H_
 
 #include "grbl.h"
+#include "real.h"
 #include "errors.h"
 
 #ifndef true
@@ -65,6 +66,11 @@
 #ifndef UNUSED
 #define UNUSED(x) (void)(x)
 #endif
+#endif
+
+#if RTCP_AC && N_AXIS == 5 && AXIS4_LETTER != 'C'
+#undef AXIS4_LETTER
+#define AXIS4_LETTER 'C'
 #endif
 
 // Axis array index values. Must start with 0 and be continuous.
@@ -355,18 +361,18 @@ typedef union {
 } mpos_t;
 
 typedef union {
-    float values[2];
+    real_t values[2];
     struct {
-        float x;
-        float y;
+        real_t x;
+        real_t y;
     };
     struct {
-        float z;
-        float x;
+        real_t z;
+        real_t x;
     } g18;
 /*    struct {
-        float y;
-        float z;
+        real_t y;
+        real_t z;
     } g19; */
 } point_2d_t;
 
@@ -376,11 +382,11 @@ typedef struct {
 } bbox_2d_t;
 
 typedef union {
-    float values[3];
+    real_t values[3];
     struct {
-        float x;
-        float y;
-        float z;
+        real_t x;
+        real_t y;
+        real_t z;
     };
 } point_3d_t;
 
@@ -548,26 +554,6 @@ static inline int ffs (int i)
     return idx;
 }
 
-static inline size_t strlcpy (char *dst, const char *src, size_t len)
-{
-    const char *s = src;
-    size_t dlen = len;
-
-    if(dlen) while(--dlen) {
-        if(!(*dst++ = *s++))
-            break;
-    }
-
-    if(dlen == 0) {
-        if(len)
-            *dst = '\0';
-        while(*s++);
-    }
-
-    return s - src - 1;
-}
-
 #endif // _WIN32
-
 
 #endif

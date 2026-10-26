@@ -304,6 +304,9 @@ FLASHMEM static void stack_unwind_sub (uint32_t o_label, bool success)
         stack_pull();
 
     if(stack_idx >= 0) {
+
+        on_endsub_ptr callback = stack[stack_idx].sub->callback;
+
         if(o_label > NGC_MAX_PARAM_ID) {
             uint32_t count = 0;
             if(stack[stack_idx].sub == get_refcount(&count) && count == 1)
@@ -312,8 +315,6 @@ FLASHMEM static void stack_unwind_sub (uint32_t o_label, bool success)
             stream_redirect_close(stack[stack_idx].file);
         } else
             stream_reposition(stack[stack_idx].file, stack[stack_idx].file_pos, stack[stack_idx].line_number);
-
-        on_endsub_ptr callback = stack[stack_idx].sub->callback;
 
         stack_pull();
 
@@ -615,15 +616,8 @@ FLASHMEM status_code_t ngc_flowctrl (uint32_t o_label, line_number_t line_number
                             {
                                 uint_fast8_t pos = 0;
                                 if(!stack[stack_idx].skip && (status = ngc_eval_expression(stack[stack_idx].expr, &pos, &value)) == Status_OK) {
-                                    if(!(stack[stack_idx].skip = value == 0))
+                                    if(!(stack[stack_idx].skip = value == 0.0f))
                                         stream_reposition(stack[stack_idx].file, stack[stack_idx].file_pos, stack[stack_idx].line_number);
-                                }
-                                if(stack[stack_idx].skip) {
-                                    if(stack[stack_idx].expr) {
-                                        free(stack[stack_idx].expr);
-                                        stack[stack_idx].expr = NULL;
-                                    }
-                                    stack_pull();
                                 }
                             }
                             break;
@@ -639,12 +633,12 @@ FLASHMEM status_code_t ngc_flowctrl (uint32_t o_label, line_number_t line_number
             break;
 
         case NGCFlowCtrl_RaiseAlarm:
-            if(!skipping && ngc_eval_expression(line, pos, &value) == Status_OK)
+            if(!skipping && (status = ngc_eval_expression(line, pos, &value)) == Status_OK)
                 system_raise_alarm((alarm_code_t)value);
             break;
 
         case NGCFlowCtrl_RaiseError:
-            if(!skipping && ngc_eval_expression(line, pos, &value) == Status_OK)
+            if(!skipping && (status = ngc_eval_expression(line, pos, &value)) == Status_OK)
                 status = (status_code_t)value;
             break;
 
@@ -693,28 +687,29 @@ FLASHMEM status_code_t ngc_flowctrl (uint32_t o_label, line_number_t line_number
 
                         char *subname;
                         if((subname = ngc_string_param_get((ngc_string_id_t)o_label))) {
-                            char _name[60];
-                            vfs_file_t *file;
+                            char _name[50];
+                            size_t len;
                             vfs_path_t macro = { .name = _name, .len = sizeof(_name) - 1 };
-                            size_t len = strlen(subname) + 20;
 
-                            if(len > macro.len && (macro.name = malloc(len + 1)) == NULL)
+                            if((len = strlen(subname) + 8) > macro.len && (macro.name = malloc(len + 1)) == NULL)
                                 status = Status_FlowControlOutOfMemory;
 
                             if(status == Status_OK) {
 
-                                sprintf(macro.name, "/littlefs/%s.macro", subname);
-                                if((file = stream_redirect_read(macro.name, onNamedSubError, onNamedSubEOF)) == NULL) {
-                                    sprintf(macro.name, "/%s.macro", subname);
-                                    file = stream_redirect_read(macro.name, onNamedSubError, onNamedSubEOF);
-                                }
+                                const char *path;
+                                vfs_file_t *file = NULL;
+
+                                if((path = vfs_locate_file(strcat(strcpy(macro.name, subname), ".macro"))))
+                                    file = stream_redirect_read(path, onNamedSubError, onNamedSubEOF);
 
                                 if(macro.name != _name)
                                     free(macro.name);
 
                                 if(file) {
-                                    if((sub = add_sub(o_label, line_number, file)) == NULL)
+                                    if((sub = add_sub(o_label, line_number, file)) == NULL) {
                                         status = Status_FlowControlOutOfMemory;
+                                        stream_redirect_close(file);
+                                    }
                                 } else
                                     status = Status_FileOpenFailed;
                             }
@@ -758,6 +753,10 @@ FLASHMEM status_code_t ngc_flowctrl (uint32_t o_label, line_number_t line_number
                                 stream_reposition(sub->file, sub->file_pos, sub->line_number);
                             }
                         }
+
+                        if(status != Status_OK && o_label > NGC_MAX_PARAM_ID)
+                            stream_redirect_close(sub->file);
+
                     } else if(status == Status_OK)
                         status = Status_FlowControlSyntaxError;
                 }

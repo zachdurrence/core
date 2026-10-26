@@ -402,13 +402,28 @@ PROGMEM static const settings_t defaults = {
     .modbus_stream_format.stopbits = DEFAULT_MODBUS_STREAM_STOP_BITS,
     .modbus_stream_format.parity = DEFAULT_MODBUS_STREAM_PARITY,
 
+    .mpg_baud_rate = DEFAULT_MPG_BAUD,
+
     .rgb_strip.length0 = DEFAULT_RGB_STRIP0_LENGTH,
     .rgb_strip.length1 = DEFAULT_RGB_STRIP1_LENGTH
 };
 
 static bool group_is_available (const setting_group_detail_t *group)
 {
-    return group->id < Group_XAxis || group->id > Group_WAxis || group->id < Group_Axis0 + system_n_axis();
+    bool available;
+
+    switch(group->id) {
+
+        case Group_MPG:
+            available = hal.driver_cap.mpg_mode;
+            break;
+
+        default:
+            available = group->id < Group_XAxis || group->id > Group_WAxis || group->id < Group_Axis0 + system_n_axis();
+            break;
+    }
+
+    return available;
 }
 
 PROGMEM static const setting_group_detail_t setting_group_detail [] = {
@@ -427,6 +442,7 @@ PROGMEM static const setting_group_detail_t setting_group_detail [] = {
      { Group_Root, Group_Jogging, "Jogging"},
      { Group_Root, Group_Stepper, "Stepper" },
      { Group_Root, Group_MotorDriver, "Stepper driver" },
+     { Group_Root, Group_MPG, "MPG/Pendant", group_is_available },
      { Group_Root, Group_Axis, "Axis", group_is_available },
      { Group_Axis, Group_XAxis, "X-axis", group_is_available },
      { Group_Axis, Group_YAxis, "Y-axis", group_is_available },
@@ -690,7 +706,7 @@ FLASHMEM static status_code_t set_axis_mask (setting_id_t id, uint_fast16_t valu
     return status;
 }
 
-FLASHMEM static uint32_t get_axis_mask (setting_id_t id, uint_fast16_t int_value)
+FLASHMEM static uint32_t get_axis_mask (setting_id_t id)
 {
     uint32_t value = 0;
 
@@ -706,7 +722,7 @@ FLASHMEM static uint32_t get_axis_mask (setting_id_t id, uint_fast16_t int_value
 
         case Setting_InvertStepperEnable:
 #if COMPATIBILITY_LEVEL > 2
-            value = !!settings.steppers.enable_invert.mask;
+            value = !settings.steppers.enable_invert.mask;
 #else
             value = settings.steppers.enable_invert.mask;
 #endif
@@ -831,6 +847,14 @@ static status_code_t set_report_interval (setting_id_t setting, uint_fast16_t in
 {
     if((settings.report_interval = int_value) == 0)
         sys.flags.auto_reporting = Off;
+
+    return Status_OK;
+}
+
+static status_code_t set_mpg_report_interval (setting_id_t setting, uint_fast16_t int_value)
+{
+    if((settings.mpg_report_interval = int_value) == 0)
+        sys.flags.mpg_auto_reporting = Off;
 
     return Status_OK;
 }
@@ -1232,6 +1256,16 @@ static status_code_t set_rotary_options (setting_id_t id, uint_fast16_t int_valu
     return Status_OK;
 }
 #endif
+
+static status_code_t mpg_set_baud (setting_id_t id, uint_fast16_t int_value)
+{
+    status_code_t status;
+
+    if((status = stream_mpg_set_baud((uint8_t)int_value) ? Status_OK : Status_SettingValueOutOfRange) == Status_OK)
+        settings.mpg_baud_rate = (uint8_t)int_value;
+
+    return status;
+}
 
 static status_code_t set_sleep_enable (setting_id_t id, uint_fast16_t int_value)
 {
@@ -1866,6 +1900,14 @@ FLASHMEM static uint32_t get_int (setting_id_t id)
             value = settings.flags.rotary_fix_enable | (settings.flags.revert_metric_conversion << 1);
             break;
 #endif
+        case Setting_MPGAutoReportInterval:
+            value = settings.mpg_report_interval;
+            break;
+
+        case Settings_MPG_BaudRate:
+            value = settings.mpg_baud_rate;
+            break;
+
         default:
             break;
     }
@@ -2207,6 +2249,14 @@ FLASHMEM static bool is_setting_available (const setting_detail_t *setting, uint
             available = hal.motor_fault_cap.a.mask != 0;
             break;
 
+        case Setting_MPGAutoReportInterval:
+            available = hal.get_elapsed_ticks != NULL && hal.driver_cap.mpg_mode;
+            break;
+
+        case Settings_MPG_BaudRate:
+            available = hal.driver_cap.mpg_mode;
+            break;
+
         default:
             break;
     }
@@ -2324,7 +2374,7 @@ PROGMEM static const setting_detail_t setting_detail[] = {
      { Setting_GangedDirInvertMask, Group_Stepper, "Ganged axes direction invert", NULL, Format_Bitfield, ganged_axes, NULL, NULL, Setting_IsExtendedFn, set_ganged_dir_invert, get_int, is_setting_available },
      { Setting_SpindlePWMOptions, Group_Spindle, "PWM spindle options", NULL, Format_XBitfield, "Enable,RPM controls spindle enable signal,Disable laser mode capability,Enable ramping" PWM_SPINDLE_NO_DELAYS, NULL, NULL, Setting_IsExtendedFn, set_pwm_options, get_int, is_setting_available },
 #if COMPATIBILITY_LEVEL <= 1
-     { Setting_StatusReportMask, Group_General, "Status report options", NULL, Format_Bitfield, "Position in machine coordinate,Buffer state,Line numbers,Feed & speed,Pin state,Work coordinate offset,Overrides,Probe coordinates,Buffer sync on WCO change,Parser state,Alarm substatus,Run substatus,Enable when homing,Distance-to-go", NULL, NULL, Setting_IsExtendedFn, set_report_mask, get_int, NULL },
+     { Setting_StatusReportMask, Group_General, "Status report options", NULL, Format_Bitfield, "Position in machine coordinate,Buffer state,Line numbers,Feed & speed,Pin state,Work coordinate offset,Overrides,Probe coordinates,Buffer sync on WCO change,Parser state,Alarm substatus,Run substatus,Enable when homing,Distance-to-go,Extended", NULL, NULL, Setting_IsExtendedFn, set_report_mask, get_int, NULL },
 #else
      { Setting_StatusReportMask, Group_General, "Status report options", NULL, Format_Bitfield, "Position in machine coordinate,Buffer state", NULL, NULL, Setting_IsLegacyFn, set_report_mask, get_int, NULL },
 #endif
@@ -2479,6 +2529,8 @@ PROGMEM static const setting_detail_t setting_detail[] = {
 #if N_AXIS > 3
      { Setting_RotaryOptions, Group_General, "Rotary options", NULL, Format_XBitfield, "Fix feedrate,Revert metric conversion", NULL, NULL, Setting_IsExpandedFn, set_rotary_options, get_int, NULL },
 #endif
+     { Setting_MPGAutoReportInterval, Group_MPG, "MPG autoreport interval", "ms", Format_Int16, "###0", "100", "1000", Setting_IsExtendedFn, set_mpg_report_interval, get_int, NULL, { .reboot_required = On, .allow_null = On } },
+     { Settings_MPG_BaudRate, Group_MPG, "MPG baud rate", NULL, Format_RadioButtons, "38400,115200,230400,460800,576000,921600", NULL, NULL, Setting_NonCoreFn, mpg_set_baud, get_int, is_setting_available },
 };
 
 PROGMEM static const setting_descr_t setting_descr[] = {
@@ -2688,9 +2740,11 @@ PROGMEM static const setting_descr_t setting_descr[] = {
     { Setting_ResetActions, "Controls actions taken on a soft reset." },
     { Setting_StepperEnableDelay, "Delay from stepper enable to first step output. The driver typically adds ~2ms to this." },
 #if N_AXIS > 3
-     { Setting_RotaryOptions, "`Fix feedrate` changes feedrate to inverse time mode for combined angular and linear moves.\\n"
+    { Setting_RotaryOptions, "`Fix feedrate` changes feedrate to inverse time mode for combined angular and linear moves.\\n"
                               "'Revert metric conversion' reverts feedrate conversion from imperial to metric for angular moves."},
 #endif
+    { Setting_MPGAutoReportInterval, "Interval the real time report will be sent to MPG/pendant, set to 0 to disable." },
+    { Settings_MPG_BaudRate, "MPG/pendant baud rate." },
 
 //    { Setting_SubroutineOptions, "Enable prescan for internal M98 subroutines." }
 /*
@@ -2765,10 +2819,23 @@ FLASHMEM void settings_write_global (void)
 /**/
 
 // Write build info to persistent storage
-FLASHMEM void settings_write_build_info (char *line)
+FLASHMEM bool settings_write_build_info (char *line)
 {
-    if(hal.nvs.type != NVS_None)
-        hal.nvs.memcpy_to_nvs(NVS_ADDR_BUILD_INFO, (uint8_t *)line, sizeof(stored_line_t), true);
+    bool ok = true;
+
+    if(hal.nvs.type != NVS_None && (ok = strlen(line) < (sizeof(stored_line_t) - 1))) {
+
+        stored_line_t bi;
+
+        memset(bi, 0xFF, sizeof(stored_line_t));
+        *bi = '\0';
+
+        strcpy(bi, line);
+
+        hal.nvs.memcpy_to_nvs(NVS_ADDR_BUILD_INFO, (uint8_t *)bi, sizeof(stored_line_t), true);
+    }
+
+    return ok;
 }
 
 // Read build info from persistent storage.
@@ -2843,31 +2910,26 @@ FLASHMEM bool settings_read_coord_data (coord_system_id_t id, coord_system_data_
 
 static tool_data_t tool_data[N_TOOLS + 1];
 
-// Write selected tool data to persistent storage.
-FLASHMEM static bool settings_set_tool_data (tool_data_t *tool)
+// Write tool data for tool, optionally to persistent storage.
+FLASHMEM static bool settings_set_tool_data (tool_data_t *tool, bool persist)
 {
     bool ok = tool->tool_id <= N_TOOLS;
 
-    if(ok && tool->tool_id && hal.nvs.type != NVS_None)
-        hal.nvs.memcpy_to_nvs(NVS_ADDR_TOOL_TABLE + (tool->tool_id - 1) * (sizeof(tool_data_t) + NVS_CRC_BYTES), (uint8_t *)tool, sizeof(tool_data_t), true);
+    if(ok && tool->tool_id) {
+        memcpy(&tool_data[tool->tool_id], tool, sizeof(tool_data_t));
+        if(persist && hal.nvs.type != NVS_None)
+            ok = hal.nvs.memcpy_to_nvs(NVS_ADDR_TOOL_TABLE + (tool->tool_id - 1) * (sizeof(tool_data_t) + NVS_CRC_BYTES), (uint8_t *)tool, sizeof(tool_data_t), true);
+    }
 
     return ok;
 }
 
-// Read selected tool data from persistent storage.
+// Read tool data for tool.
 FLASHMEM static tool_table_entry_t *settings_get_tool_data (tool_id_t tool_id)
 {
     static tool_table_entry_t tool = {0};
 
     tool.data = tool_id <= N_TOOLS ? &tool_data[tool_id] : NULL;
-
-    if(tool_id && tool.data && !(hal.nvs.type != NVS_None &&
-                                  hal.nvs.memcpy_from_nvs((uint8_t *)tool.data, NVS_ADDR_TOOL_TABLE + (tool_id - 1) * (sizeof(tool_data_t) + NVS_CRC_BYTES),
-                                                            sizeof(tool_data_t), true) == NVS_TransferResult_OK && tool.data->tool_id == tool_id)) {
-        memset(tool.data, 0, sizeof(tool_data_t));
-        tool.data->tool_id = tool_id;
-    }
-
     tool.pocket = (pocket_id_t)(tool.data ? tool_id : -1);
 
     return &tool;
@@ -2878,14 +2940,32 @@ FLASHMEM static bool settings_clear_tool_data (void)
 {
     uint_fast8_t idx;
 
-    tool_data_t tool_data;
-    memset(&tool_data, 0, sizeof(tool_data_t));
-    for (idx = 1; idx <= N_TOOLS; idx++) {
-        tool_data.tool_id = (tool_id_t)idx;
-        settings_set_tool_data(&tool_data);
+    memset(&tool_data, 0, sizeof(tool_data));
+    for(idx = 1; idx <= N_TOOLS; idx++) {
+        tool_data[idx].tool_id = (tool_id_t)idx;
+        settings_set_tool_data(&tool_data[idx], true);
     }
 
     return true;
+}
+
+// Load tool table from persistent storage.
+FLASHMEM static status_code_t settings_load_tool_data (void)
+{
+    uint_fast8_t idx;
+
+    memset(&tool_data, 0, sizeof(tool_data));
+    for(idx = 1; idx <= N_TOOLS; idx++) {
+        if(hal.nvs.type != NVS_None) {
+            if(!(hal.nvs.memcpy_from_nvs((uint8_t *)&tool_data[idx], NVS_ADDR_TOOL_TABLE + (idx - 1) * (sizeof(tool_data_t) + NVS_CRC_BYTES),
+                                           sizeof(tool_data_t), true) == NVS_TransferResult_OK && tool_data[idx].tool_id == idx)) {
+                memset(&tool_data[idx], 0, sizeof(tool_data_t));
+                tool_data[idx].tool_id = (tool_id_t)idx;
+            }
+        }
+    }
+
+    return Status_OK;
 }
 
 #else
@@ -2893,7 +2973,7 @@ FLASHMEM static bool settings_clear_tool_data (void)
 static tool_data_t tool_data = {0};
 
 // Write selected tool data to persistent storage.
-FLASHMEM static bool settings_set_tool_data (tool_data_t *tool_data)
+FLASHMEM static bool settings_set_tool_data (tool_data_t *tool_data, bool persist)
 {
     return true;
 }
@@ -2913,6 +2993,12 @@ FLASHMEM static tool_table_entry_t *settings_get_tool_data (tool_id_t tool_id)
     }
 
     return &tool;
+}
+
+// Load tool table from persistent storage.
+FLASHMEM static status_code_t settings_load_tool_data (void)
+{
+    return Status_OK;
 }
 
 // Clear all tool data in persistent storage.
@@ -2982,10 +3068,8 @@ FLASHMEM void settings_restore (settings_restore_t restore)
             settings_write_startup_line(idx, empty_line);
     }
 
-    if(restore.build_info) {
-        settings_write_build_info(empty_line);
+    if(restore.build_info)
         settings_write_build_info(BUILD_INFO);
-    }
 
     if(restore.defaults)
         grbl.on_settings_changed(&settings, (settings_changed_flags_t){-1});
@@ -3196,7 +3280,8 @@ FLASHMEM const char *setting_get_description (setting_id_t id)
                                 strcat(buf, v);
                                 strcat(buf, s + 1);
                                 description = buf;
-                            }
+                            } else
+                                buflen = 0;
                         }
                     }
                 } while(idx && description == NULL);
@@ -3280,7 +3365,7 @@ FLASHMEM static status_code_t validate_uint_value (const setting_detail_t *setti
         set_idx = 0;
 
         if((status = read_uint((char *)setting->max_value, &set_idx, &val)) != Status_OK)
-            return Status_BadNumberFormat;
+            return status;
 
         if(value > val)
             return Status_SettingValueOutOfRange;
@@ -3312,10 +3397,10 @@ FLASHMEM bool setting_is_list (const setting_detail_t *setting)
 
 FLASHMEM bool setting_is_integer (const setting_detail_t *setting)
 {
-    return setting->datatype == Format_Integer || setting->datatype == Format_Int8 || setting->datatype == Format_Int16;
+    return setting->datatype == Format_Integer || setting->datatype == Format_Int8 || setting->datatype == Format_Int16 || setting->datatype == Format_Bool;
 }
 
-FLASHMEM static char *remove_element (char *s, uint_fast8_t entry)
+FLASHMEM static void remove_element (char *s, int_fast8_t entry)
 {
     while(entry && *s) {
         if(*s == ',')
@@ -3324,18 +3409,19 @@ FLASHMEM static char *remove_element (char *s, uint_fast8_t entry)
     }
 
     if(entry == 0) {
-        *s++ = 'N';
-        *s++ = '/';
-        *s++ = 'A';
         char *s2 = s;
+
         while(*s2 && *s2 != ',')
             s2++;
-        while(*s2)
-            *s++ = *s2++;
-        *s = '\0';
-    }
 
-    return s;
+        if(*s2 && s2 - s != 3)
+            memmove(s + 3, s2, strlen(s2) + 1);
+
+        memcpy(s, "N/A", 3);
+
+        if(!*s2)
+            *(s + 3) = '\0';
+    }
 }
 
 FLASHMEM static void setting_remove_element (setting_id_t id, uint_fast8_t pos)
@@ -3516,7 +3602,7 @@ FLASHMEM status_code_t settings_store_setting (setting_id_t id, char *svalue)
         return Status_BadNumberFormat;
 
     if((status = setting_validate_me(setting, value, svalue)) != Status_OK) {
-        if(setting == Setting_PulseMicroseconds && status == Status_SettingValueOutOfRange)
+        if(id == Setting_PulseMicroseconds && status == Status_SettingValueOutOfRange)
             status =  Status_SettingStepPulseMin;
 
         return status;
@@ -3595,7 +3681,7 @@ FLASHMEM status_code_t settings_store_setting (setting_id_t id, char *svalue)
         if(set->save)
             set->save();
 
-        if(set == &global_settings && set->on_changed == NULL)
+        if(set == &global_settings)
             set->on_changed = grbl.on_settings_changed;
 
         if(set->on_changed) {
@@ -3661,6 +3747,13 @@ FLASHMEM void onFileDemarcate (bool start)
         on_file_demarcate(start);
 }
 
+#if defined(__clang__)
+static tool_table_entry_t *_clang_get_tool (uint32_t tool_id)
+{
+    return settings_get_tool_data((tool_id_t)tool_id);
+}
+#endif
+
 // Initialize the config subsystem
 FLASHMEM void settings_init (void)
 {
@@ -3674,13 +3767,19 @@ FLASHMEM void settings_init (void)
     if(grbl.tool_table.n_tools == 0) {
         grbl.tool_table.n_tools = N_TOOLS;
         grbl.tool_table.get_tool = settings_get_tool_data;
+#if defined(__clang__)
+        grbl.tool_table.get_tool_by_idx = _clang_get_tool;
+#else
         grbl.tool_table.get_tool_by_idx = (get_tool_by_idx_ptr)settings_get_tool_data;
+#endif
         grbl.tool_table.set_tool = settings_set_tool_data;
         grbl.tool_table.clear = settings_clear_tool_data;
+        grbl.tool_table.reload = settings_load_tool_data;
     }
 
 #if N_TOOLS
     memset(tool_data, 0, sizeof(tool_data_t)); // First entry is for tools not in tool table
+    settings_load_tool_data();
 #endif
 
     strcpy(step_us_min, ftoa(hal.step_us_min, 1));
@@ -3805,10 +3904,15 @@ FLASHMEM void settings_init (void)
             }
         }
 
+        if(settings.version.build <= 260903)
+            settings.mpg_baud_rate = DEFAULT_MPG_BAUD;
+
         settings.version.build = (GRBL_BUILD - 20000000UL);
 
         global_settings.save();
     }
+
+    stream_mpg_set_baud(settings.mpg_baud_rate);
 
     global_settings.on_changed = grbl.on_settings_changed;
 

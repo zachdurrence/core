@@ -278,6 +278,11 @@
     homing_accel_init();
 #endif
 
+#if MPG_ENABLE > 2
+    extern void mpg_init (void);
+    mpg_init();
+#endif
+
 // End third party plugin definitions.
 
 #if ODOMETER_ENABLE
