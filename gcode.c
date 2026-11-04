@@ -4022,6 +4022,13 @@ status_code_t gc_execute_block (char *block)
         memcpy(&plan_data.spindle, spindle, sizeof(spindle_t));
         plan_data.condition.coolant = gc_state.modal.coolant;
         plan_data.condition.is_rpm_rate_adjusted = spindle->state.ccw && spindle->hal->cap.laser;
+#if ENABLE_ACCELERATION_PROFILES
+        // ZD: plan_data is zero-initialized above and the jog path returns before the
+        // normal acceleration_factor assignment further down, so jogs reached the
+        // planner with acceleration_factor = 0 -> zero acceleration and jerk -> the
+        // stepper's minimum-step-per-segment crawl. Jog at the default (100%) profile.
+        plan_data.acceleration_factor = gc_get_accel_factor(0);
+#endif
 
         if((status_code_t)(int_value = (uint_fast16_t)mc_jog_execute(&plan_data, &gc_block, gc_state.position)) == Status_OK)
             memcpy(gc_state.position, gc_block.values.xyz, sizeof(gc_state.position));
